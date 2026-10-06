@@ -669,6 +669,51 @@ td.hol-merge.w .hol-v{font-size:18px;letter-spacing:.3em}
 .board.calm td.col-hol{background:#fdf1cf}
 .board.calm tr.me > td.col-hol{background:#f7e9bf}
 
+/* ===== v36.8 浮動離席按鈕 ===== */
+.fab-wrap{position:fixed;right:22px;bottom:22px;z-index:45;display:flex;flex-direction:column;align-items:flex-end;gap:10px}
+.fab{position:fixed;right:22px;bottom:22px;z-index:45;display:flex;align-items:center;gap:8px;padding:12px 20px 12px 16px;border-radius:999px;
+  background:var(--mint-d);color:#fff;box-shadow:0 6px 0 #3a9a90,0 12px 28px rgba(0,0,0,.2);font-weight:900;font-size:15px;transition:transform .15s}
+.fab-wrap .fab{position:static}
+.fab:hover{transform:translateY(-2px)}
+.fab:active{transform:translateY(2px);box-shadow:0 3px 0 #3a9a90}
+.fab span{display:flex;flex-direction:column;line-height:1.15;text-align:left}
+.fab small{font-size:11px;font-weight:800;opacity:.9}
+.fab.open{background:#8d6e63;box-shadow:0 6px 0 #6d4c41,0 12px 28px rgba(0,0,0,.2)}
+.fab-away{background:#fb8c00;box-shadow:0 6px 0 #e65100,0 12px 28px rgba(0,0,0,.2);animation:glow 2s infinite}
+.fab-away.late{background:#e53935;box-shadow:0 6px 0 #b71c1c,0 12px 28px rgba(0,0,0,.2)}
+.fab-menu{background:#fff;border:4px solid var(--sand);border-radius:24px;padding:12px;box-shadow:0 16px 40px rgba(0,0,0,.2);width:290px;animation:pop .15s ease}
+.fab-title{font-weight:900;margin:0 0 8px 4px}
+.fab-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.fab-grid button{display:flex;flex-direction:column;align-items:center;gap:2px;padding:10px 0;border-radius:16px;background:#faf8f2;border:2px solid var(--line);font-weight:900;font-size:13px}
+.fab-grid button span{font-size:28px;line-height:1}
+.fab-grid button:hover{border-color:var(--mint);background:#fff}
+@media (max-width:760px){ .fab,.fab-wrap{right:14px;bottom:84px} .fab{padding:10px 16px 10px 12px;font-size:14px} }
+@media print{ .fab,.fab-wrap{display:none!important} }
+
+/* ===== 門口看板 ===== */
+.kiosk{min-height:calc(100vh - 28px);display:flex;flex-direction:column;gap:18px}
+.k-head{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;background:var(--mint);border-radius:var(--r-xl);padding:16px 22px;border-bottom:5px solid #5cb8a1;box-shadow:var(--shadow)}
+.k-head h1{margin:0;font-size:26px;font-weight:900;color:#2f7a68;text-shadow:1px 1px 0 #fff}
+.k-sub{font-weight:800;color:#2f6b5c;font-size:14px}
+.k-clock{display:flex;flex-direction:column;align-items:center;line-height:1.1}
+.k-clock b{font-size:40px;font-weight:900;color:#fff;text-shadow:0 2px 0 #3a9a90}
+.k-clock span{font-weight:800;color:#2f6b5c}
+.k-stat{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.k-stat .chip{font-size:14px;padding:5px 12px}
+.k-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:16px}
+.k-card{background:#fff;border:5px solid var(--line);border-radius:28px;padding:18px 10px 14px;display:flex;flex-direction:column;align-items:center;gap:8px;box-shadow:var(--shadow);transition:transform .12s}
+.k-card:hover{transform:translateY(-3px);border-color:var(--mint)}
+.k-card:active{transform:scale(.97)}
+.k-name{font-size:20px;font-weight:900}
+.k-st{font-size:15px;font-weight:900;padding:3px 14px;border-radius:999px}
+.k-st.ok{background:var(--leaf-bg);color:#2e7d32}
+.k-card.away{border-color:#ffb74d;background:#fff8ee}
+.k-card.away .k-st{background:#ffe0b2;color:#e65100}
+.k-card.late{border-color:#e53935;background:#fff5f5;animation:glowRed 1.4s infinite}
+.k-card.late .k-st{background:#ffcdd2;color:#c62828}
+.k-card.off{opacity:.55}
+.k-card.off .k-st{background:#f3efe4}
+
 </style>
 </head>
 <body>
@@ -838,7 +883,10 @@ let ui = {
   awayPerson: null,
   mpOpen: false, mpYear: null,  // 年月選擇器             // 離席分析目前點選的人
   modal: null,
-  awayPromptAt: 0,              // 上次跳出「你回來了嗎」的時間
+  awayPromptAt: 0,
+  kiosk: /kiosk/i.test(location.hash),   // 門口看板模式（網址加 #kiosk）
+  kioskActor: null,             // 看板上是誰在操作（寫進異動紀錄）
+  fabOpen: false,               // 浮動離席按鈕的選單是否展開              // 上次跳出「你回來了嗎」的時間
   cloud: 'idle',                // idle | syncing | saved | error | offline
   lastSync: null,
 };
@@ -954,7 +1002,7 @@ const commit = (opts = {}) => {
 
 const logAction = (action, details) => {
   const u = me();
-  db.auditLogs.unshift({ timestamp: new Date().toLocaleString('zh-TW', { hour12: false }), user: u ? u.name : '系統', action, details });
+  db.auditLogs.unshift({ timestamp: new Date().toLocaleString('zh-TW', { hour12: false }), user: ui.kiosk ? `${ui.kioskActor || '同仁'}（看板）` : u ? u.name : '系統', action, details });
   if (db.auditLogs.length > 500) db.auditLogs.length = 500;
 };
 
@@ -1101,6 +1149,7 @@ const TABS = [
 
 const render = () => {
   const app = document.getElementById('app');
+  if (ui.kiosk) { app.innerHTML = renderKiosk(); return; }
   if (!me()) { app.innerHTML = renderLogin(); return; }
   const tabs = TABS.filter(t => !t.admin || isAdmin());
   if (!tabs.find(t => t.id === ui.tab)) ui.tab = 'schedule';
@@ -1122,6 +1171,7 @@ const render = () => {
         ${ui.tab === 'audit' ? renderAudit() : ''}
       </main>
     </div>
+    ${renderFab()}
     <nav class="bottomnav">${tabs.map(t => `
       <button class="${ui.tab === t.id ? 'on' : ''}" onclick="go('${t.id}')">${icon(t.icon)}<span>${t.name}</span></button>`).join('')}
     </nav>`;
@@ -1793,6 +1843,7 @@ const renderAwayStats = () => {
   return `
   <div class="toolbar">
     <div class="row" style="flex-wrap:wrap"><h2 style="margin:0;font-size:18px;font-weight:900;display:flex;gap:8px;align-items:center">${icon('Timer')} 離席分析</h2>
+      ${admin ? `<button class="btn btn-sm btn-coral" onclick="openKiosk()" title="在新分頁打開，放到門口平板使用">${icon('LayoutGrid', 'sm')} 開啟門口看板</button>` : ''}
       <span class="muted" style="font-size:12px;font-weight:700">${admin ? '全體同仁' : '只顯示你自己的紀錄'}</span></div>
     <div class="seg">${ranges.map(([k, v]) => `<button class="${ui.awayRange === k ? 'on' : ''}" onclick="setAwayRange('${k}')">${v}</button>`).join('')}</div>
   </div>
@@ -1875,6 +1926,52 @@ const layoutAwayChips = () => {
   });
 };
 window.addEventListener('resize', () => { if (ui.tab === 'dashboard') { clearTimeout(window.__lt); window.__lt = setTimeout(render, 150); } });
+
+// ---------- 浮動離席按鈕（每一頁右下角）----------
+const renderFab = () => {
+  const u = me(), r = u && u.id !== 0 ? resById(u.id) : null;
+  if (!r || r.isResigned) return '';
+  if (r.activeSession) {
+    const mins = awayMins(r);
+    return `<button class="fab fab-away ${mins >= AWAY_ALERT_MINUTES ? 'late' : ''}" onclick="fabToggle(event)" title="點一下回到崗位">
+      ${icon('Undo2', 'lg')}<span><b>回崗</b><small>${esc(r.activeSession.reason || '')} ${mins} 分</small></span></button>`;
+  }
+  return `<div class="fab-wrap" onclick="event.stopPropagation()">
+    ${ui.fabOpen ? `<div class="fab-menu" role="menu">
+      <div class="fab-title">要去哪裡？</div>
+      <div class="fab-grid">${AWAY_TYPES.map(a => `<button role="menuitem" onclick="fabPick(${arg(a.label)})"><span>${a.icon}</span>${esc(a.label)}</button>`).join('')}</div>
+    </div>` : ''}
+    <button class="fab ${ui.fabOpen ? 'open' : ''}" onclick="fabToggle(event)" aria-expanded="${ui.fabOpen}" title="快速記錄離席">${ui.fabOpen ? icon('X', 'lg') : icon('Coffee', 'lg')}<span><b>${ui.fabOpen ? '取消' : '離席'}</b></span></button>
+  </div>`;
+};
+
+// ---------- 門口看板（#kiosk，不需登入）----------
+const renderKiosk = () => {
+  const t = new Date(), y = t.getFullYear(), m = t.getMonth(), d = t.getDate();
+  const staff = db.residents.filter(r => !r.isResigned && !r.isParentalLeave);
+  const awayN = staff.filter(r => r.activeSession).length;
+  return `
+  <div class="kiosk">
+    <header class="k-head">
+      <div class="brand"><div class="brand-badge">${icon('MonitorPlay', 'lg')}</div>
+        <div><h1>離席看板</h1><div class="k-sub">點自己的頭像 → 選原因，回來再點一次</div></div></div>
+      <div class="k-clock"><b class="num" id="clock">${hhmm(t)}</b><span>${m + 1} 月 ${d} 日（週${WD[t.getDay()]}）</span></div>
+      <div class="k-stat"><span class="chip chip-leaf">在崗 ${staff.length - awayN}</span><span class="chip chip-away">暫離 ${awayN}</span>
+        <button class="pill pill-white" id="cloud-pill" onclick="manualSync()" title="立即同步">${cloudIcon()}</button>
+        <button class="btn btn-soft btn-sm" onclick="exitKiosk()">離開看板</button></div>
+    </header>
+    <div class="k-grid">${staff.map(r => {
+      const s = shiftAt(r.id, y, m, d), off = OFF_TYPES.includes(s) && !leavesOf(keyOf(r.id, y, m, d)).length;
+      const away = r.activeSession, mins = away ? awayMins(r) : 0;
+      return `<button class="k-card ${away ? 'away' : ''} ${away && mins >= AWAY_ALERT_MINUTES ? 'late' : ''} ${off && !away ? 'off' : ''}" onclick="kioskTap(${r.id})">
+        ${avatar(r, 84)}
+        <div class="k-name">${esc(r.name)}</div>
+        ${away ? `<div class="k-st">${esc((AWAY_TYPES.find(a => a.label === away.reason) || {}).icon || '⏳')} ${esc(away.reason || '暫離')}・<b class="num">${mins}</b> 分</div>`
+          : off ? `<div class="k-st muted">今日${esc(cfgOf(s).label)}</div>` : '<div class="k-st ok">在崗</div>'}
+      </button>`;
+    }).join('') || '<div class="empty-state">尚無人員資料，請稍候同步</div>'}</div>
+  </div>`;
+};
 
 // =====================================================================
 //  彈出視窗
@@ -1988,7 +2085,7 @@ function mCell({ rid, d }) {
 }
 
 // ---------- 離席 ----------
-function mAway({ id, welcome }) {
+function mAway({ id, welcome, kiosk }) {
   const r = resById(id); if (!r) return sheet({ title: '找不到人員', body: '' });
   const on = !!r.activeSession;
   const hero = `<div class="away-hero">${avatar(r, 76)}<div style="font-size:20px;font-weight:900;margin-top:6px">${esc(r.name)}</div>
@@ -2249,7 +2346,7 @@ const pickMonth = (v) => { if (!v) return; const [y, m] = v.split('-').map(Numbe
 const toggleMonthPicker = (e) => { if (e) e.stopPropagation(); ui.mpOpen = !ui.mpOpen; ui.mpYear = ui.year; render(); };
 const mpYear = (d) => { ui.mpYear = (ui.mpYear ?? ui.year) + d; render(); };
 const mpPick = (y, m) => { ui.year = y; ui.month = m; ui.week = null; ui.mpOpen = false; render(); };
-document.addEventListener('click', () => { if (ui.mpOpen) { ui.mpOpen = false; render(); } });
+document.addEventListener('click', () => { if (ui.mpOpen || ui.fabOpen) { ui.mpOpen = false; ui.fabOpen = false; render(); } });
 const togglePw = (id, btn) => {
   const el = document.getElementById(id); if (!el) return;
   const show = el.type === 'password';
@@ -2448,24 +2545,52 @@ const saveNote = (k, v) => {
 const fillNote = (k, v) => { const el = document.getElementById('note-input'); if (el) el.value = v; saveNote(k, v); };
 
 // 離席
-const startAway = (id, reason) => {
-  const r = resById(id); if (!r) return;
-  r.activeSession = { startTime: new Date(), reason }; r.status = `暫離: ${reason}`;
-  logAction('離席', `${r.name} ${reason}`);
-  closeModal(); commit(); updateTitle(); toast(`${r.name} 暫離：${reason}`);
+// 離席／回崗：畫面先立即更新，背景再抓雲端最新資料、套用同一個動作後上傳，減少多人同時操作互相覆蓋
+const quickSync = (op) => {
+  op(); cacheSave(); render();
+  if (!gasReady()) { commit({ render: false }); return; }
+  if (savePending || saving) { commit({ render: false }); return; }
+  ui.cloud = 'syncing'; paintStatus();
+  (async () => {
+    try { const json = await callGAS({ action: 'load' }); if (json.data && !savePending && !saving) { db = normalizeDB(json.data); op(); } } catch (e) {}
+    cacheSave(); clearTimeout(saveTimer); savePending = true;
+    if (!ui.modal && !typing()) render();
+    await saveToCloud();
+  })();
 };
-const finishAway = (r, start, end, label) => {
+const startAway = (id, reason) => {
+  const st = new Date();
+  const op = () => { const r = resById(id); if (!r || r.activeSession) return; r.activeSession = { startTime: st, reason }; r.status = `暫離: ${reason}`; logAction('離席', `${r.name} ${reason}`); };
+  const r = resById(id); if (!r) return;
+  ui.fabOpen = false; closeModal(); quickSync(op); updateTitle(); toast(`${r.name} 暫離：${reason}`);
+};
+const finishAway = (r0, start, end, label) => {
   let mins = Math.round((end - start) / 60000);
   if (mins < 0) mins += 1440;
   mins = Math.max(1, mins);
-  const reason = r.activeSession.reason;
-  r.awayMinutes = (r.awayMinutes || 0) + mins;
-  const realEnd = new Date(start.getTime() + mins * 60000);
-  r.awayLog.unshift({ id: Date.now().toString(36), reason, minutes: mins, time: label || `${hhmm(start)} - ${hhmm(end)}`, date: `${start.getMonth() + 1}/${start.getDate()}`, start: start.toISOString(), end: realEnd.toISOString() });
-  r.activeSession = null; r.status = '工作中';
-  logAction('回崗', `${r.name} 結束 ${reason}（${mins} 分）`);
-  closeModal(); commit(); updateTitle(); toast(`歡迎回來！離開 ${mins} 分鐘`);
+  const realEnd = new Date(start.getTime() + mins * 60000), id = r0.id, reason0 = r0.activeSession ? r0.activeSession.reason : '其他';
+  const op = () => {
+    const r = resById(id); if (!r) return;
+    if (r.awayLog.some(l => l.start === start.toISOString())) { r.activeSession = null; return; }   // 已經記過（例如另一台裝置）
+    const reason = r.activeSession ? r.activeSession.reason : reason0;
+    r.awayMinutes = (r.awayMinutes || 0) + mins;
+    r.awayLog.unshift({ id: Date.now().toString(36), reason, minutes: mins, time: label || `${hhmm(start)} - ${hhmm(end)}`, date: `${start.getMonth() + 1}/${start.getDate()}`, start: start.toISOString(), end: realEnd.toISOString() });
+    r.activeSession = null; r.status = '工作中';
+    logAction('回崗', `${r.name} 結束 ${reason}（${mins} 分）`);
+  };
+  ui.fabOpen = false; closeModal(); quickSync(op); updateTitle(); toast(`歡迎回來！離開 ${mins} 分鐘`);
 };
+// 浮動離席按鈕
+const fabToggle = (e) => { if (e) e.stopPropagation(); const u = me(), r = u && resById(u.id); if (!r) return;
+  if (r.activeSession) return returnNow(r.id);
+  ui.fabOpen = !ui.fabOpen; render(); };
+const fabPick = (reason) => { const u = me(); if (u) startAway(u.id, reason); };
+// 看板
+const kioskTap = (id) => { const r = resById(id); if (!r) return; ui.kioskActor = r.name; openModal('away', { id, kiosk: true }); kioskIdle(); };
+let kioskTimer;
+const kioskIdle = () => { clearTimeout(kioskTimer); kioskTimer = setTimeout(() => { if (ui.kiosk && ui.modal) closeModal(); }, 25000); };   // 25 秒沒動作自動關閉
+const exitKiosk = () => { history.replaceState(null, '', location.pathname + location.search); ui.kiosk = false; ui.kioskActor = null; render(); };
+const openKiosk = () => window.open(location.pathname + location.search + '#kiosk', '_blank');
 const returnNow = (id) => { const r = resById(id); if (!r || !r.activeSession) return closeModal(); finishAway(r, new Date(r.activeSession.startTime), new Date()); };
 const returnWithTime = (id) => {
   const r = resById(id); if (!r || !r.activeSession) return closeModal();
@@ -2762,14 +2887,14 @@ setInterval(async () => {
   const nowD = new Date();
   if (nowD.getMinutes() !== lastMinute) {          // 每分鐘更新一次離席計時
     lastMinute = nowD.getMinutes();
-    if (me() && !ui.modal && !typing()) render();
+    if ((me() || ui.kiosk) && !ui.modal && !typing()) render();
     updateTitle();
     const u = me(), r = u && u.id !== 0 ? resById(u.id) : null;
     if (r && r.activeSession && awayMins(r) === AWAY_ALERT_MINUTES && document.visibilityState === 'visible') checkAwayPrompt();
   }
-  if (++syncCounter >= AUTO_SYNC_SECONDS) {
+  if (++syncCounter >= (ui.kiosk ? 30 : AUTO_SYNC_SECONDS)) {
     syncCounter = 0;
-    if (me() && !ui.modal && !savePending && !saving && !typing() && document.visibilityState === 'visible') {
+    if ((me() || ui.kiosk) && !ui.modal && !savePending && !saving && !typing() && document.visibilityState === 'visible') {
       if (await loadFromCloud({ silent: true })) { afterCloudLoad(); if (!ui.modal && !typing()) render(); else paintStatus(); }
       else paintStatus();
     }
@@ -2794,6 +2919,7 @@ const updateTitle = () => {
   const u = me(), r = u && u.id !== 0 ? resById(u.id) : null;
   document.title = r && r.activeSession ? `⏳ 暫離 ${awayMins(r)} 分｜按我回崗` : '視聽中心排班系統';
 };
+window.addEventListener('hashchange', () => { const k = /kiosk/i.test(location.hash); if (k !== ui.kiosk) { ui.kiosk = k; render(); } });
 window.addEventListener('beforeunload', (e) => { if (savePending || saving) { e.preventDefault(); e.returnValue = ''; } });
 
 // 啟動
