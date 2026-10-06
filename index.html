@@ -718,6 +718,10 @@ td.hol-merge.w .hol-v{font-size:18px;letter-spacing:.3em}
 .board.calm tr.me > td.col-hol{background:#fbe3a0!important}
 .board.calm td.col-hol .mcell,.board.calm td.col-hol .cell{box-shadow:0 0 0 2px #fff}
 .hol-v.sm{font-size:10px;letter-spacing:0}
+td.hol-merge{position:relative;cursor:pointer}
+.hol-hl{position:absolute;left:2px;right:2px;border-radius:8px;background:rgba(255,255,255,.55);box-shadow:inset 0 0 0 2px #e0a800;opacity:0;pointer-events:none;transition:opacity .1s}
+.hol-hl.on{opacity:1}
+td.hol-merge .hol-v{position:relative}
 
 </style>
 </head>
@@ -1341,8 +1345,10 @@ const holMergeCell = (d, h, n, cls, showName, nameLen) => {
   const { year: y, month: m } = ui;
   const name = h.name || HOLIDAY_KINDS[h.kind]?.label || '';
   const small = showName && name.length > n * 2 + 1;           // 列數太少放不下就縮小字
-  return `<td rowspan="${n}" class="hol-merge ${cls}" ${isAdmin() ? `onclick="openModal('events', {date:'${y}-${pad(m + 1)}-${pad(d)}'})" style="cursor:pointer"` : ''} title="${esc((HOLIDAY_KINDS[h.kind]?.label || '') + '：' + name)}">
-    ${showName ? `<div class="hol-v ${small ? 'sm' : ''}">${esc(name)}</div>` : ''}</td>`;
+  // 合併的格子一樣可以點：依滑鼠位置判斷點到哪一個人，打開那個人當天的排班
+  return `<td rowspan="${n}" class="hol-merge ${cls}" onclick="holClick(event, ${d}, ${n})" onmousemove="holHover(event, ${n})" onmouseleave="holHover(null)"
+      title="${esc((HOLIDAY_KINDS[h.kind]?.label || '') + '：' + name)}・點某個人那一列可替他排值班">
+    <span class="hol-hl"></span>${showName ? `<div class="hol-v ${small ? 'sm' : ''}">${esc(name)}</div>` : ''}</td>`;
 };
 
 const renderWeekGrid = (days) => {
@@ -1378,7 +1384,7 @@ const renderWeekGrid = (days) => {
         ${note ? `<span class="nt">${esc(note)}</span>` : ''}
       </button></td>`;
     }).join('');
-    return `<tr class="${r.id === ui.userId ? 'me' : ''} ${r.isResigned || r.isParentalLeave ? 'dim' : ''}">
+    return `<tr data-rid="${r.id}" class="${r.id === ui.userId ? 'me' : ''} ${r.isResigned || r.isParentalLeave ? 'dim' : ''}">
       <th class="col-name"><div class="col-name-inner">
         ${avatar(r, 30)}
         <span class="nm">${esc(r.name)}</span>
@@ -1418,7 +1424,7 @@ const renderMonthGrid = () => {
         ${ok ? `onclick="cellClick(${r.id},${d})"` : 'tabindex="-1"'} title="${m + 1}/${d} ${esc(c.fullLabel)}${t ? ' ' + esc(t) : ''}${note ? '｜' + esc(note) : ''}${chg ? '｜臨時改班，原訂：' + esc(sigText(planSigAt(r.id, y, m, d))) : ''}">
         ${esc(c.short)}${leavesOf(k).length ? `<span class="lv" style="background:${parseColor(cfgOf(leavesOf(k)[0].type).color).fg}"></span>` : ''}${db.scheduleOvertime[k] ? '<span class="ot"></span>' : ''}${note ? '<span class="nt"></span>' : ''}</button></td>`;
     }).join('');
-    return `<tr class="${r.id === ui.userId ? 'me' : ''} ${r.isResigned || r.isParentalLeave ? 'dim' : ''}">
+    return `<tr data-rid="${r.id}" class="${r.id === ui.userId ? 'me' : ''} ${r.isResigned || r.isParentalLeave ? 'dim' : ''}">
       <th class="col-name"><div class="col-name-inner">${avatar(r, 24)}<span class="nm">${esc(r.name)}</span>${r.id === ui.userId ? '<span class="me-tag">我</span>' : ''}</div></th>
       ${cells}<td class="col-sum num">${round1(hrs)}h</td></tr>`;
   }).join('');
@@ -1989,6 +1995,25 @@ const renderKiosk = () => {
       </button>`;
     }).join('') || '<div class="empty-state">尚無人員資料，請稍候同步</div>'}</div>
   </div>`;
+};
+
+// 找出合併格子裡，滑鼠所在的是哪一列（哪個人）
+const holRowAt = (e, n) => {
+  const td = e.currentTarget, tr = td.parentElement, rows = [...tr.parentElement.rows], start = rows.indexOf(tr);
+  for (let k = start; k < start + n && k < rows.length; k++) {
+    const rc = rows[k].getBoundingClientRect();
+    if (e.clientY >= rc.top && e.clientY <= rc.bottom) return { row: rows[k], rc, td };
+  }
+  return null;
+};
+const holClick = (e, d, n) => { const hit = holRowAt(e, n); if (hit) cellClick(Number(hit.row.dataset.rid), d); };
+const holHover = (e, n) => {
+  document.querySelectorAll('.hol-hl.on').forEach(x => x.classList.remove('on'));
+  if (!e) return;
+  const hit = holRowAt(e, n); if (!hit) return;
+  const hl = hit.td.querySelector('.hol-hl'), tdr = hit.td.getBoundingClientRect();
+  hl.style.top = (hit.rc.top - tdr.top) + 'px'; hl.style.height = hit.rc.height + 'px'; hl.classList.add('on');
+  const r = resById(hit.row.dataset.rid); hit.td.title = r ? `${r.name}：點一下替他排這天的班` : '';
 };
 
 // =====================================================================
