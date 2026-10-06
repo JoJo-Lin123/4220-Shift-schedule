@@ -713,6 +713,11 @@ td.hol-merge.w .hol-v{font-size:18px;letter-spacing:.3em}
 .k-card.late .k-st{background:#ffcdd2;color:#c62828}
 .k-card.off{opacity:.55}
 .k-card.off .k-st{background:#f3efe4}
+/* 國定假日：有人值班的那一格也是金色底，跟合併塊連成一欄 */
+.board.calm td.col-hol{background:#fbe3a0!important}
+.board.calm tr.me > td.col-hol{background:#fbe3a0!important}
+.board.calm td.col-hol .mcell,.board.calm td.col-hol .cell{box-shadow:0 0 0 2px #fff}
+.hol-v.sm{font-size:10px;letter-spacing:0}
 
 </style>
 </head>
@@ -1309,7 +1314,7 @@ const orderedResidents = () => {
   return [...db.residents].sort((a, b) => rank(a) - rank(b));
 };
 
-// 國定假日整欄合併：當天所有人都是預設的放假（沒有人值班、支援），就合併成一格直書顯示假日名稱
+// 國定假日整欄合併：放假的人連續的幾列合併成一塊金色直書；有人值班的那一格照常顯示班別（像 Excel 合併儲存格）
 const mergedHolidays = (days) => {
   const { year: y, month: m } = ui, list = orderedResidents(), out = {};
   if (!ui.calm || !list.length) return out;
@@ -1317,14 +1322,27 @@ const mergedHolidays = (days) => {
     if (!d) return;
     const h = holidayAt(y, m, d);
     if (!h || HOLIDAY_KINDS[h.kind]?.off === false) return;
-    if (list.every(r => cellTone(r.id, y, m, d) === 'rest' && !db.scheduleNotes[keyOf(r.id, y, m, d)])) out[d] = h;
+    const isOff = list.map(r => cellTone(r.id, y, m, d) === 'rest' && !db.scheduleNotes[keyOf(r.id, y, m, d)]);
+    if (!isOff.some(Boolean)) return;
+    const start = new Map(), skip = new Set();
+    let best = -1, bestLen = 0;
+    for (let i = 0; i < isOff.length;) {
+      if (!isOff[i]) { i++; continue; }
+      let j = i; while (j < isOff.length && isOff[j]) j++;
+      start.set(i, j - i); for (let k = i + 1; k < j; k++) skip.add(k);
+      if (j - i > bestLen) { bestLen = j - i; best = i; }
+      i = j;
+    }
+    out[d] = { h, start, skip, nameRi: best, nameLen: bestLen };
   });
   return out;
 };
-const holMergeCell = (d, h, n, cls) => {
+const holMergeCell = (d, h, n, cls, showName, nameLen) => {
   const { year: y, month: m } = ui;
-  return `<td rowspan="${n}" class="hol-merge ${cls}" ${isAdmin() ? `onclick="openModal('events', {date:'${y}-${pad(m + 1)}-${pad(d)}'})" style="cursor:pointer"` : ''} title="${esc((HOLIDAY_KINDS[h.kind]?.label || '') + '：' + h.name)}（全員放假）">
-    <div class="hol-v">${esc(h.name || HOLIDAY_KINDS[h.kind]?.label)}</div></td>`;
+  const name = h.name || HOLIDAY_KINDS[h.kind]?.label || '';
+  const small = showName && name.length > n * 2 + 1;           // 列數太少放不下就縮小字
+  return `<td rowspan="${n}" class="hol-merge ${cls}" ${isAdmin() ? `onclick="openModal('events', {date:'${y}-${pad(m + 1)}-${pad(d)}'})" style="cursor:pointer"` : ''} title="${esc((HOLIDAY_KINDS[h.kind]?.label || '') + '：' + name)}">
+    ${showName ? `<div class="hol-v ${small ? 'sm' : ''}">${esc(name)}</div>` : ''}</td>`;
 };
 
 const renderWeekGrid = (days) => {
@@ -1345,7 +1363,7 @@ const renderWeekGrid = (days) => {
     const ots = days.reduce((s, d) => s + (d ? otHours(keyOf(r.id, y, m, d)) : 0), 0);
     const cells = days.map(d => {
       if (!d) return `<td><div class="cell empty"></div></td>`;
-      if (merged[d]) return ri === 0 ? holMergeCell(d, merged[d], nRows, 'w') : '';
+      if (merged[d]) { const p = merged[d]; if (p.skip.has(ri)) return ''; if (p.start.has(ri)) return holMergeCell(d, p.h, p.start.get(ri), 'w', ri === p.nameRi, p.nameLen); }
       const k = keyOf(r.id, y, m, d), s = shiftAt(r.id, y, m, d), c = cfgOf(s);
       const t = db.scheduleTimes[k], note = db.scheduleNotes[k], ot = otOf(k), oh = otHours(k);
       const ok = canEdit(r.id) && (!ui.brush || admin);
@@ -1390,7 +1408,7 @@ const renderMonthGrid = () => {
     let hrs = 0;
     const cells = days.map(d => {
       hrs += hoursAt(r.id, y, m, d);
-      if (merged[d]) return ri === 0 ? holMergeCell(d, merged[d], nRows, 'm') : '';
+      if (merged[d]) { const p = merged[d]; if (p.skip.has(ri)) return ''; if (p.start.has(ri)) return holMergeCell(d, p.h, p.start.get(ri), 'm', ri === p.nameRi, p.nameLen); }
       const k = keyOf(r.id, y, m, d), s = shiftAt(r.id, y, m, d), c = cfgOf(s);
       const ok = canEdit(r.id) && (!ui.brush || admin);
       const t = db.scheduleTimes[k], note = db.scheduleNotes[k];
