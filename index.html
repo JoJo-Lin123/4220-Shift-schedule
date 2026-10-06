@@ -643,6 +643,23 @@ button.rank-row .nm{display:block}
   .blk .blk-rest{order:4;flex:1 1 100%}
 }
 
+/* ===== v36.7 簡潔顯示：一般班淡化、休息日整欄灰底、只有例外上色 ===== */
+.seg-sm button{padding:4px 11px;font-size:12px}
+.board.calm .shift{border-color:transparent!important;box-shadow:none}
+.board.calm .mcell.routine,.board.calm .cell.routine{background:transparent!important;color:#c7bfae!important;font-weight:700}
+.board.calm .mcell.rest,.board.calm .cell.rest{background:transparent!important;color:transparent!important}
+.board.calm .cell.routine .lb{font-weight:700;font-size:12px}
+.board.calm td.col-rest{background:#f4f1ea}
+.board.calm table.mgrid td.col-rest:first-of-type{border-radius:0}
+.board.calm .mcell:not(.routine):not(.rest),.board.calm .cell:not(.routine):not(.rest):not(.empty){box-shadow:0 1px 0 rgba(0,0,0,.06)}
+.board.calm .mcell.routine:hover,.board.calm .mcell.rest:hover,.board.calm .cell.routine:hover,.board.calm .cell.rest:hover{background:#fff!important;box-shadow:0 0 0 2px var(--mint)!important;color:var(--bark-2)!important}
+.board.calm .mcell.changed,.board.calm .cell.changed{border-color:transparent!important}
+.board.calm table.mgrid{border-spacing:2px 4px}
+.board.calm tr.me > td{background:#e3f6ee}
+.board.calm tr.me > td.col-rest{background:#dcefe6}
+.board.calm table.mgrid tbody tr:hover > td{background:#fbf8f0}
+.board.calm table.mgrid tbody tr.me:hover > td{background:#d5f1e5}
+
 </style>
 </head>
 <body>
@@ -801,11 +818,12 @@ const now0 = new Date();
 let ui = {
   userId: null,                 // 0 = 內建管理者
   tab: 'schedule',
-  view: 'month',                 // week | month
+  view: 'month',                // 排班預設顯示：month = 月檢視、week = 週檢視
   year: now0.getFullYear(), month: now0.getMonth(),
   week: null,                   // 週索引，null = 自動跳到今天所在週
   brush: null,                  // 快速排班：選中的班別
   showLegend: false,
+  calm: (() => { try { return localStorage.getItem('av_calm') !== '0'; } catch (e) { return true; } })(),   // 簡潔顯示：一般班淡化、只突顯例外
   logQuery: '',
   awayRange: 'month',           // 離席分析的期間：today | week | month | all
   awayPerson: null,
@@ -996,6 +1014,15 @@ const cellSig = (rid, y, m, d) => { const k = keyOf(rid, y, m, d); return JSON.s
 const planSigAt = (rid, y, m, d) => { const p = planOf(y, m); return p && p.sigs ? p.sigs[keyOf(rid, y, m, d)] : undefined; };
 const changedAt = (rid, y, m, d) => { const ps = planSigAt(rid, y, m, d); return ps !== undefined && ps !== cellSig(rid, y, m, d); };
 const sigText = (sig) => { try { const [s, t, l] = JSON.parse(sig); return [s, t, ...(l || []).map(x => '請' + x)].filter(Boolean).join(' '); } catch (e) { return ''; } };
+// 簡潔顯示用：這一格是「一般上班」或「休息」就淡化，其餘（值班、請假、加班、臨時改班）才上色
+const cellTone = (rid, y, m, d) => {
+  if (!ui.calm) return '';
+  const k = keyOf(rid, y, m, d), s = shiftAt(rid, y, m, d);
+  if (leavesOf(k).length || db.scheduleOvertime[k] || changedAt(rid, y, m, d)) return '';
+  if (REST_TYPES.includes(s) && !db.scheduleTimes[k]) return 'rest';
+  if (s === '正常班' && !db.scheduleTimes[k]) return 'routine';
+  return '';
+};
 const evName = (e) => (e && typeof e === 'object') ? e.name : e;
 const evNote = (e) => (e && typeof e === 'object') ? (e.note || '') : '';
 const isToday = (y, m, d) => { const t = new Date(); return t.getFullYear() === y && t.getMonth() === m && t.getDate() === d; };
@@ -1188,6 +1215,8 @@ const renderSchedule = () => {
       </div>
       <div class="row" style="flex-wrap:wrap">
         ${planChip()}
+        <div class="seg seg-sm" title="簡潔：一般上班與休息日淡化，只突顯值班、請假等例外">
+          <button class="${ui.calm ? 'on' : ''}" onclick="setCalm(true)">簡潔</button><button class="${ui.calm ? '' : 'on'}" onclick="setCalm(false)">彩色</button></div>
         <button class="btn btn-soft btn-sm legend-toggle" onclick="toggleLegend()">${icon('StickyNote', 'sm')} 圖例</button>
         ${admin ? `<button class="btn btn-sm ${ui.brush ? 'btn-coral' : 'btn-soft'}" onclick="toggleBrush()">${icon('Paintbrush', 'sm')} 快速排班</button>` : ''}
         <button class="btn btn-soft btn-sm" onclick="printMonth()">${icon('Printer', 'sm')} 列印</button>
@@ -1242,7 +1271,7 @@ const renderWeekGrid = (days) => {
       const t = db.scheduleTimes[k], note = db.scheduleNotes[k], ot = otOf(k), oh = otHours(k);
       const ok = canEdit(r.id) && (!ui.brush || admin);
       const chg = changedAt(r.id, y, m, d);
-      return `<td><button class="cell shift ${db.schedule[k] ? '' : 'auto'} ${ok ? '' : 'locked'} ${chg ? 'changed' : ''}" style="${shiftStyle(c)}"
+      return `<td class="${isRestDay(y, m, d) && ui.calm ? 'col-rest' : ''}"><button class="cell shift ${db.schedule[k] ? '' : 'auto'} ${ok ? '' : 'locked'} ${chg ? 'changed' : ''} ${cellTone(r.id, y, m, d)}" style="${shiftStyle(c)}"
           ${ok ? `onclick="cellClick(${r.id},${d})"` : 'tabindex="-1"'} title="${esc(c.fullLabel)}${t ? ' ' + esc(t) : ''}${note ? '｜' + esc(note) : ''}${chg ? '｜臨時改班，原訂：' + esc(sigText(planSigAt(r.id, y, m, d))) : ''}">
         ${chg ? '<span class="chg-tag">臨時</span>' : ''}
         ${ot ? `<span class="ot-tag" title="加班${ot.start ? ' ' + esc(ot.start + '-' + ot.end) : ''}">加${oh ? '+' + round1(oh) + 'h' : ''}</span>` : ''}
@@ -1262,7 +1291,7 @@ const renderWeekGrid = (days) => {
         ${r.activeSession ? `<span class="away-tag">${esc(r.activeSession.reason || '暫離')} ${awayMins(r)}m</span>` : ''}
       </div></th>${cells}</tr>`;
   }).join('');
-  return `<div class="board ${ui.brush ? 'brushing' : ''}"><div class="board-scroll">
+  return `<div class="board ${ui.brush ? 'brushing' : ''} ${ui.calm ? 'calm' : ''}"><div class="board-scroll">
     <table class="grid" style="min-width:760px"><thead><tr><th class="col-name"></th>${head}</tr></thead><tbody>${rows}</tbody></table>
   </div></div>`;
 };
@@ -1285,7 +1314,8 @@ const renderMonthGrid = () => {
       const ok = canEdit(r.id) && (!ui.brush || admin);
       const t = db.scheduleTimes[k], note = db.scheduleNotes[k];
       const chg = changedAt(r.id, y, m, d);
-      return `<td class="${isToday(y, m, d) ? 'col-today' : ''}"><button class="mcell shift ${ok ? '' : 'locked'} ${chg ? 'changed' : ''}" style="${shiftStyle(c)}${db.schedule[k] ? '' : ';opacity:.8'}"
+      const tone = cellTone(r.id, y, m, d);
+      return `<td class="${isToday(y, m, d) ? 'col-today' : ''} ${isRestDay(y, m, d) && ui.calm ? 'col-rest' : ''}"><button class="mcell shift ${ok ? '' : 'locked'} ${chg ? 'changed' : ''} ${tone}" style="${shiftStyle(c)}${db.schedule[k] || tone ? '' : ';opacity:.8'}"
         ${ok ? `onclick="cellClick(${r.id},${d})"` : 'tabindex="-1"'} title="${m + 1}/${d} ${esc(c.fullLabel)}${t ? ' ' + esc(t) : ''}${note ? '｜' + esc(note) : ''}${chg ? '｜臨時改班，原訂：' + esc(sigText(planSigAt(r.id, y, m, d))) : ''}">
         ${esc(c.short)}${leavesOf(k).length ? `<span class="lv" style="background:${parseColor(cfgOf(leavesOf(k)[0].type).color).fg}"></span>` : ''}${db.scheduleOvertime[k] ? '<span class="ot"></span>' : ''}${note ? '<span class="nt"></span>' : ''}</button></td>`;
     }).join('');
@@ -1293,7 +1323,7 @@ const renderMonthGrid = () => {
       <th class="col-name"><div class="col-name-inner">${avatar(r, 24)}<span class="nm">${esc(r.name)}</span>${r.id === ui.userId ? '<span class="me-tag">我</span>' : ''}</div></th>
       ${cells}<td class="col-sum num">${round1(hrs)}h</td></tr>`;
   }).join('');
-  return `<div class="board ${ui.brush ? 'brushing' : ''}"><div class="board-scroll">
+  return `<div class="board ${ui.brush ? 'brushing' : ''} ${ui.calm ? 'calm' : ''}"><div class="board-scroll">
     <table class="mgrid"><thead><tr><th class="col-name"></th>${head}<th class="col-sum" style="font-size:11px;color:var(--bark-2)">月工時</th></tr></thead><tbody>${rows}</tbody></table>
   </div></div>`;
 };
@@ -2205,6 +2235,7 @@ const shiftWeek = (delta) => {
   if (next >= n) return shiftMonth(1);
   ui.week = next; render();
 };
+const setCalm = (v) => { ui.calm = v; try { localStorage.setItem('av_calm', v ? '1' : '0'); } catch (e) {} render(); };
 const toggleLegend = () => { ui.showLegend = !ui.showLegend; render(); };
 const toggleBrush = () => { ui.brush = ui.brush ? null : Object.keys(db.shiftConfig)[0]; render(); };
 const setBrush = (k) => { ui.brush = k; render(); };
@@ -2682,7 +2713,7 @@ const doLogin = async () => {
     if (chk('remember-me')) localStorage.setItem(REMEMBER_KEY, JSON.stringify({ u, id: user.id, auto: true }));
     else localStorage.removeItem(REMEMBER_KEY);
   } catch (e) {}
-  ui.userId = user.id;    ui.tab = 'schedule'; ui.view = 'month'; ui.week = null;
+  ui.userId = user.id; ui.tab = 'schedule'; ui.view = 'month'; ui.week = null;
   render(); updateTitle(); checkAwayPrompt();
   if (user.id === 0) loadFromCloud({ silent: true }).then(() => { afterCloudLoad(); render(); });
 };
