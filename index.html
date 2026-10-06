@@ -659,6 +659,15 @@ button.rank-row .nm{display:block}
 .board.calm tr.me > td.col-rest{background:#dcefe6}
 .board.calm table.mgrid tbody tr:hover > td{background:#fbf8f0}
 .board.calm table.mgrid tbody tr.me:hover > td{background:#d5f1e5}
+/* 國定假日整欄合併（直書） */
+td.hol-merge{background:#fbe3a0!important;border-radius:10px;vertical-align:middle;text-align:center;box-shadow:inset 0 0 0 2px #f6cf68}
+td.hol-merge:hover{filter:brightness(.97)}
+.hol-v{writing-mode:vertical-rl;text-orientation:upright;margin:0 auto;font-weight:900;color:#7a4b00;letter-spacing:.2em;font-size:13px;line-height:1.1;padding:8px 0}
+td.hol-merge.w .hol-v{font-size:18px;letter-spacing:.3em}
+.mhead.hol{background:#fbe3a0}
+.dayhead.hol{background:#fff4d2;border-color:#f6cf68}
+.board.calm td.col-hol{background:#fdf1cf}
+.board.calm tr.me > td.col-hol{background:#f7e9bf}
 
 </style>
 </head>
@@ -1250,6 +1259,24 @@ const orderedResidents = () => {
   return [...db.residents].sort((a, b) => rank(a) - rank(b));
 };
 
+// 國定假日整欄合併：當天所有人都是預設的放假（沒有人值班、支援），就合併成一格直書顯示假日名稱
+const mergedHolidays = (days) => {
+  const { year: y, month: m } = ui, list = orderedResidents(), out = {};
+  if (!ui.calm || !list.length) return out;
+  days.forEach(d => {
+    if (!d) return;
+    const h = holidayAt(y, m, d);
+    if (!h || HOLIDAY_KINDS[h.kind]?.off === false) return;
+    if (list.every(r => cellTone(r.id, y, m, d) === 'rest' && !db.scheduleNotes[keyOf(r.id, y, m, d)])) out[d] = h;
+  });
+  return out;
+};
+const holMergeCell = (d, h, n, cls) => {
+  const { year: y, month: m } = ui;
+  return `<td rowspan="${n}" class="hol-merge ${cls}" ${isAdmin() ? `onclick="openModal('events', {date:'${y}-${pad(m + 1)}-${pad(d)}'})" style="cursor:pointer"` : ''} title="${esc((HOLIDAY_KINDS[h.kind]?.label || '') + '：' + h.name)}（全員放假）">
+    <div class="hol-v">${esc(h.name || HOLIDAY_KINDS[h.kind]?.label)}</div></td>`;
+};
+
 const renderWeekGrid = (days) => {
   const { year: y, month: m } = ui;
   const admin = isAdmin();
@@ -1262,16 +1289,18 @@ const renderWeekGrid = (days) => {
       <div class="d">${m + 1}/${d}</div><div class="w">週${WD[w]}</div>
       ${h ? `<div class="hol-name" style="background:${hk ? hk.color : '#e53935'}">${esc(h.name || hk.label)}</div>` : ''}</div></th>`;
   }).join('');
-  const rows = orderedResidents().map(r => {
+  const merged = mergedHolidays(days), nRows = orderedResidents().length;
+  const rows = orderedResidents().map((r, ri) => {
     const hrs = days.reduce((s, d) => s + (d ? hoursAt(r.id, y, m, d) : 0), 0);
     const ots = days.reduce((s, d) => s + (d ? otHours(keyOf(r.id, y, m, d)) : 0), 0);
     const cells = days.map(d => {
       if (!d) return `<td><div class="cell empty"></div></td>`;
+      if (merged[d]) return ri === 0 ? holMergeCell(d, merged[d], nRows, 'w') : '';
       const k = keyOf(r.id, y, m, d), s = shiftAt(r.id, y, m, d), c = cfgOf(s);
       const t = db.scheduleTimes[k], note = db.scheduleNotes[k], ot = otOf(k), oh = otHours(k);
       const ok = canEdit(r.id) && (!ui.brush || admin);
       const chg = changedAt(r.id, y, m, d);
-      return `<td class="${isRestDay(y, m, d) && ui.calm ? 'col-rest' : ''}"><button class="cell shift ${db.schedule[k] ? '' : 'auto'} ${ok ? '' : 'locked'} ${chg ? 'changed' : ''} ${cellTone(r.id, y, m, d)}" style="${shiftStyle(c)}"
+      return `<td class="${isRestDay(y, m, d) && ui.calm ? 'col-rest' : ''} ${ui.calm && holidayAt(y, m, d) && HOLIDAY_KINDS[holidayAt(y, m, d).kind]?.off !== false ? 'col-hol' : ''}"><button class="cell shift ${db.schedule[k] ? '' : 'auto'} ${ok ? '' : 'locked'} ${chg ? 'changed' : ''} ${cellTone(r.id, y, m, d)}" style="${shiftStyle(c)}"
           ${ok ? `onclick="cellClick(${r.id},${d})"` : 'tabindex="-1"'} title="${esc(c.fullLabel)}${t ? ' ' + esc(t) : ''}${note ? '｜' + esc(note) : ''}${chg ? '｜臨時改班，原訂：' + esc(sigText(planSigAt(r.id, y, m, d))) : ''}">
         ${chg ? '<span class="chg-tag">臨時</span>' : ''}
         ${ot ? `<span class="ot-tag" title="加班${ot.start ? ' ' + esc(ot.start + '-' + ot.end) : ''}">加${oh ? '+' + round1(oh) + 'h' : ''}</span>` : ''}
@@ -1306,16 +1335,18 @@ const renderMonthGrid = () => {
       ${admin ? `style="cursor:pointer" onclick="openModal('events', {date:'${y}-${pad(m + 1)}-${pad(d)}'})"` : ''}>
       ${ev.length ? '<span class="dot"></span>' : ''}${h ? `<span class="hol-bar" style="background:${hk ? hk.color : '#e53935'}"></span>` : ''}<div class="d">${d}</div><div class="w">${WD[w]}</div></div></th>`;
   }).join('');
-  const rows = orderedResidents().map(r => {
+  const merged = mergedHolidays(days), nRows = orderedResidents().length;
+  const rows = orderedResidents().map((r, ri) => {
     let hrs = 0;
     const cells = days.map(d => {
       hrs += hoursAt(r.id, y, m, d);
+      if (merged[d]) return ri === 0 ? holMergeCell(d, merged[d], nRows, 'm') : '';
       const k = keyOf(r.id, y, m, d), s = shiftAt(r.id, y, m, d), c = cfgOf(s);
       const ok = canEdit(r.id) && (!ui.brush || admin);
       const t = db.scheduleTimes[k], note = db.scheduleNotes[k];
       const chg = changedAt(r.id, y, m, d);
       const tone = cellTone(r.id, y, m, d);
-      return `<td class="${isToday(y, m, d) ? 'col-today' : ''} ${isRestDay(y, m, d) && ui.calm ? 'col-rest' : ''}"><button class="mcell shift ${ok ? '' : 'locked'} ${chg ? 'changed' : ''} ${tone}" style="${shiftStyle(c)}${db.schedule[k] || tone ? '' : ';opacity:.8'}"
+      return `<td class="${isToday(y, m, d) ? 'col-today' : ''} ${isRestDay(y, m, d) && ui.calm ? 'col-rest' : ''} ${ui.calm && holidayAt(y, m, d) && HOLIDAY_KINDS[holidayAt(y, m, d).kind]?.off !== false ? 'col-hol' : ''}"><button class="mcell shift ${ok ? '' : 'locked'} ${chg ? 'changed' : ''} ${tone}" style="${shiftStyle(c)}${db.schedule[k] || tone ? '' : ';opacity:.8'}"
         ${ok ? `onclick="cellClick(${r.id},${d})"` : 'tabindex="-1"'} title="${m + 1}/${d} ${esc(c.fullLabel)}${t ? ' ' + esc(t) : ''}${note ? '｜' + esc(note) : ''}${chg ? '｜臨時改班，原訂：' + esc(sigText(planSigAt(r.id, y, m, d))) : ''}">
         ${esc(c.short)}${leavesOf(k).length ? `<span class="lv" style="background:${parseColor(cfgOf(leavesOf(k)[0].type).color).fg}"></span>` : ''}${db.scheduleOvertime[k] ? '<span class="ot"></span>' : ''}${note ? '<span class="nt"></span>' : ''}</button></td>`;
     }).join('');
