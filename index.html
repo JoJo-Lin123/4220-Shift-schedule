@@ -722,6 +722,20 @@ td.hol-merge{position:relative;cursor:pointer}
 .hol-hl{position:absolute;left:2px;right:2px;border-radius:8px;background:rgba(255,255,255,.55);box-shadow:inset 0 0 0 2px #e0a800;opacity:0;pointer-events:none;transition:opacity .1s}
 .hol-hl.on{opacity:1}
 td.hol-merge .hol-v{position:relative}
+/* ===== v36.9 時間軸日期、快速離席選人 ===== */
+.tl-nav{display:flex;align-items:center;gap:6px}
+.tl-nav .inp{width:150px;padding:6px 10px}
+.fab-menu{width:340px;max-height:70vh;overflow:auto}
+.fab-people{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}
+.fab-person{display:flex;align-items:center;gap:6px;padding:3px 10px 3px 3px;border-radius:999px;border:2px solid var(--line);background:#fff;font-weight:800;font-size:12.5px}
+.fab-person small{color:#e65100;font-weight:900}
+.fab-person.away{background:#fff3e0;border-color:#ffcc80}
+.fab-person.on{border-color:var(--mint-d);background:#e6f8f1;box-shadow:0 0 0 2px var(--mint)}
+.fab-back{background:#fff3e0;border-radius:14px;padding:10px;display:flex;flex-direction:column;gap:8px;font-weight:700}
+.fab-row{display:flex;align-items:center;gap:10px}
+.fab-mini{width:46px;height:46px;border-radius:50%;background:#fff;border:3px solid var(--sand);display:grid;place-items:center;color:var(--bark-2);box-shadow:var(--shadow)}
+.fab-mini:hover{background:var(--sun-bg)}
+@media (max-width:760px){ .fab-menu{width:calc(100vw - 28px)} .tl-nav .inp{width:130px} }
 
 </style>
 </head>
@@ -895,7 +909,8 @@ let ui = {
   awayPromptAt: 0,
   kiosk: /kiosk/i.test(location.hash),   // 門口看板模式（網址加 #kiosk）
   kioskActor: null,             // 看板上是誰在操作（寫進異動紀錄）
-  fabOpen: false,               // 浮動離席按鈕的選單是否展開              // 上次跳出「你回來了嗎」的時間
+  fabOpen: false, fabTarget: null,   // 快速離席：選單是否展開、目前選的人
+  tlDate: null,                 // 總覽時間軸查看的日期（null = 今天）               // 浮動離席按鈕的選單是否展開              // 上次跳出「你回來了嗎」的時間
   cloud: 'idle',                // idle | syncing | saved | error | offline
   lastSync: null,
 };
@@ -1484,8 +1499,9 @@ const avStack = (list, max = 5) => `<span class="avstack">${list.slice(0, max).m
 
 // ---------- 今日時間軸（甘特圖）----------
 const renderTimeline = () => {
-  const t = new Date(), y = t.getFullYear(), m = t.getMonth(), d = t.getDate();
-  const nowM = t.getHours() * 60 + t.getMinutes();
+  const real = new Date(), t = ui.tlDate ? new Date(ui.tlDate) : real, y = t.getFullYear(), m = t.getMonth(), d = t.getDate();
+  const viewToday = sameDay(t, real);
+  const nowM = viewToday ? real.getHours() * 60 + real.getMinutes() : -1;
   const rows = activeStaff().map(r => {
     const k = keyOf(r.id, y, m, d), s = shiftAt(r.id, y, m, d), c = cfgOf(s), segs = [];
     const working = baseHoursAt(r.id, y, m, d) > 0;
@@ -1501,11 +1517,11 @@ const renderTimeline = () => {
       awayN++; awayM += Number(l.minutes) || 0;
       segs.push({ kind: 'awayDone', a, b: a + (Number(l.minutes) || 1), reason: l.reason, mins: l.minutes, idx: i, rid: r.id, label: `${l.reason} ${l.time}（${l.minutes} 分）${canEdit(r.id) ? '・點一下可修改' : ''}` });
     });
-    if (r.activeSession) { const st = new Date(r.activeSession.startTime); awayN++; awayM += awayMins(r); segs.push({ kind: 'away', a: st.getHours() * 60 + st.getMinutes(), b: nowM, label: `暫離中・${r.activeSession.reason || ''} ${awayMins(r)} 分` }); }
+    if (viewToday && r.activeSession) { const st = new Date(r.activeSession.startTime); awayN++; awayM += awayMins(r); segs.push({ kind: 'away', a: st.getHours() * 60 + st.getMinutes(), b: nowM, label: `暫離中・${r.activeSession.reason || ''} ${awayMins(r)} 分` }); }
     return { r, s, c, segs, working, awayN, awayM };
   });
   const all = rows.flatMap(x => x.segs);
-  let lo = Math.min(420, ...all.map(x => x.a)), hi = Math.max(1200, ...all.map(x => x.b), nowM + 30);
+  let lo = Math.min(420, ...all.map(x => x.a)), hi = Math.max(1200, ...all.map(x => x.b), viewToday ? nowM + 30 : 0);
   lo = Math.floor(lo / 60) * 60; hi = Math.min(1440 + 120, Math.ceil(hi / 60) * 60);
   const pos = (x) => ((x - lo) / (hi - lo)) * 100;
   const ticks = []; for (let h = lo; h <= hi; h += 60) ticks.push(h);
@@ -1523,11 +1539,17 @@ const renderTimeline = () => {
     const txt = g.kind === 'work' ? g.c.label : g.kind === 'leave' ? g.c.label : g.kind === 'ot' ? '加班' : '暫離';
     return `<span class="tl-seg ${g.kind}" style="left:${left}%;width:${w}%;${style}" title="${esc(g.label)}">${w > 6 ? esc(txt) : ''}</span>`;
   };
-  const nowLine = nowM >= lo && nowM <= hi ? `<span class="tl-now" style="left:${pos(nowM)}%"><b>${hhmm(t)}</b></span>` : '';
+  const nowLine = nowM >= lo && nowM <= hi ? `<span class="tl-now" style="left:${pos(nowM)}%"><b>${hhmm(real)}</b></span>` : '';
   return `
   <div class="card tl-card">
     <div class="card-title"><div class="title-dot" style="background:var(--mint-d)">${icon('Clock')}</div>
-      <div style="flex:1"><h2>今日時間軸</h2><p>${m + 1}/${d}（週${WD[t.getDay()]}）誰在什麼時段上班、請假、加班、暫離，一眼看完</p></div>
+      <div style="flex:1;min-width:200px"><h2>${viewToday ? '今日' : `${m + 1}/${d}`}時間軸</h2><p>${y}/${m + 1}/${d}（週${WD[t.getDay()]}）誰在什麼時段上班、請假、加班、離席</p></div>
+      <div class="tl-nav">
+        <button class="round-btn" onclick="shiftTl(-1)" aria-label="前一天">${icon('ChevronLeft', 'sm')}</button>
+        <input type="date" class="inp" value="${y}-${pad(m + 1)}-${pad(d)}" onchange="setTlDate(this.value)" aria-label="選擇日期">
+        <button class="round-btn" onclick="shiftTl(1)" aria-label="後一天">${icon('ChevronRight', 'sm')}</button>
+        ${viewToday ? '' : '<button class="btn btn-soft btn-sm" onclick="setTlDate(null)">回到今天</button>'}
+      </div>
       <div class="tl-legend">
         <span><i style="background:#e0f2fe;border-color:#bae6fd"></i>上班</span>
         <span><i style="background:repeating-linear-gradient(135deg,#f8bbd0 0 4px,#fff 4px 7px);border-color:#f48fb1"></i>請假</span>
@@ -1537,7 +1559,7 @@ const renderTimeline = () => {
       </div></div>
     <div class="tl">
       <div class="tl-row tl-head"><div class="tl-name"></div><div class="tl-track">
-        ${ticks.map((h, i) => `<span class="tl-tick ${i % 2 ? 'odd' : ''}" style="left:${pos(h)}%">${pad(Math.floor(h / 60) % 24)}</span>`).join('')}</div><div class="tl-sum muted">今日離席</div></div>
+        ${ticks.map((h, i) => `<span class="tl-tick ${i % 2 ? 'odd' : ''}" style="left:${pos(h)}%">${pad(Math.floor(h / 60) % 24)}</span>`).join('')}</div><div class="tl-sum muted">${viewToday ? '今日' : '當日'}離席</div></div>
       ${rows.map(x => `
       <div class="tl-row ${x.r.id === ui.userId ? 'me' : ''}">
         <div class="tl-name">${avatar(x.r, 26)}<span>${esc(x.r.name)}</span></div>
@@ -1953,20 +1975,31 @@ window.addEventListener('resize', () => { if (ui.tab === 'dashboard') { clearTim
 
 // ---------- 浮動離席按鈕（每一頁右下角）----------
 const renderFab = () => {
-  const u = me(), r = u && u.id !== 0 ? resById(u.id) : null;
-  if (!r || r.isResigned) return '';
-  if (r.activeSession) {
-    const mins = awayMins(r);
-    return `<button class="fab fab-away ${mins >= AWAY_ALERT_MINUTES ? 'late' : ''}" onclick="fabToggle(event)" title="點一下回到崗位">
-      ${icon('Undo2', 'lg')}<span><b>回崗</b><small>${esc(r.activeSession.reason || '')} ${mins} 分</small></span></button>`;
-  }
-  return `<div class="fab-wrap" onclick="event.stopPropagation()">
-    ${ui.fabOpen ? `<div class="fab-menu" role="menu">
-      <div class="fab-title">要去哪裡？</div>
-      <div class="fab-grid">${AWAY_TYPES.map(a => `<button role="menuitem" onclick="fabPick(${arg(a.label)})"><span>${a.icon}</span>${esc(a.label)}</button>`).join('')}</div>
-    </div>` : ''}
-    <button class="fab ${ui.fabOpen ? 'open' : ''}" onclick="fabToggle(event)" aria-expanded="${ui.fabOpen}" title="快速記錄離席">${ui.fabOpen ? icon('X', 'lg') : icon('Coffee', 'lg')}<span><b>${ui.fabOpen ? '取消' : '離席'}</b></span></button>
-  </div>`;
+  const u = me(); if (!u) return '';
+  const self = u.id !== 0 ? resById(u.id) : null;
+  const staff = db.residents.filter(r => !r.isResigned && !r.isParentalLeave);
+  if (!staff.length) return '';
+  const tid = ui.fabTarget ?? (self && !self.isResigned ? self.id : null);
+  const target = tid != null ? resById(tid) : null;
+  const menu = ui.fabOpen ? `<div class="fab-menu" role="menu">
+      <div class="fab-title">誰要離席？</div>
+      <div class="fab-people">${staff.map(r => `<button class="fab-person ${target && target.id === r.id ? 'on' : ''} ${r.activeSession ? 'away' : ''}" onclick="fabTarget(${r.id})">
+        ${avatar(r, 34)}<span>${esc(r.name)}${self && r.id === self.id ? '（我）' : ''}</span>${r.activeSession ? `<small>${awayMins(r)} 分</small>` : ''}</button>`).join('')}</div>
+      ${!target ? '<div class="muted" style="font-weight:700;padding:6px 4px">請先點選一個人</div>'
+        : target.activeSession ? `<div class="fab-back">
+            <div><b>${esc(target.name)}</b> 暫離中・${esc(target.activeSession.reason || '')} <b class="num">${awayMins(target)}</b> 分</div>
+            <button class="btn btn-coral btn-block" onclick="returnNow(${target.id})">${icon('Undo2', 'sm')} ${esc(target.name)} 回崗</button></div>`
+        : `<div class="fab-title" style="margin-top:8px">${esc(target.name)} 要去哪裡？</div>
+           <div class="fab-grid">${AWAY_TYPES.map(a => `<button role="menuitem" onclick="fabPick(${arg(a.label)})"><span>${a.icon}</span>${esc(a.label)}</button>`).join('')}</div>`}
+    </div>` : '';
+  const selfAway = self && self.activeSession;
+  const main = selfAway && !ui.fabOpen
+    ? `<div class="fab-row">
+        <button class="fab-mini" onclick="fabToggle(event)" title="幫其他人記錄離席" aria-label="幫其他人記錄離席">${icon('Users')}</button>
+        <button class="fab fab-away ${awayMins(self) >= AWAY_ALERT_MINUTES ? 'late' : ''}" onclick="returnNow(${self.id})" title="點一下回到崗位">
+          ${icon('Undo2', 'lg')}<span><b>回崗</b><small>${esc(self.activeSession.reason || '')} ${awayMins(self)} 分</small></span></button></div>`
+    : `<button class="fab ${ui.fabOpen ? 'open' : ''}" onclick="fabToggle(event)" aria-expanded="${!!ui.fabOpen}" title="快速記錄離席">${ui.fabOpen ? icon('X', 'lg') : icon('Coffee', 'lg')}<span><b>${ui.fabOpen ? '關閉' : '離席'}</b></span></button>`;
+  return `<div class="fab-wrap" onclick="event.stopPropagation()">${menu}${main}</div>`;
 };
 
 // ---------- 門口看板（#kiosk，不需登入）----------
@@ -2602,6 +2635,7 @@ const quickSync = (op) => {
   })();
 };
 const startAway = (id, reason) => {
+  ui.fabTarget = null;
   const st = new Date();
   const op = () => { const r = resById(id); if (!r || r.activeSession) return; r.activeSession = { startTime: st, reason }; r.status = `暫離: ${reason}`; logAction('離席', `${r.name} ${reason}`); };
   const r = resById(id); if (!r) return;
@@ -2621,13 +2655,19 @@ const finishAway = (r0, start, end, label) => {
     r.activeSession = null; r.status = '工作中';
     logAction('回崗', `${r.name} 結束 ${reason}（${mins} 分）`);
   };
-  ui.fabOpen = false; closeModal(); quickSync(op); updateTitle(); toast(`歡迎回來！離開 ${mins} 分鐘`);
+  ui.fabOpen = false; ui.fabTarget = null; closeModal(); quickSync(op); updateTitle(); toast(`${r0.name} 回崗，離開 ${mins} 分鐘`);
 };
 // 浮動離席按鈕
-const fabToggle = (e) => { if (e) e.stopPropagation(); const u = me(), r = u && resById(u.id); if (!r) return;
-  if (r.activeSession) return returnNow(r.id);
-  ui.fabOpen = !ui.fabOpen; render(); };
-const fabPick = (reason) => { const u = me(); if (u) startAway(u.id, reason); };
+const fabToggle = (e) => { if (e) e.stopPropagation(); ui.fabOpen = !ui.fabOpen; ui.fabTarget = null; render(); };
+const fabTarget = (id) => { ui.fabTarget = id; render(); };
+const fabPick = (reason) => {
+  const u = me(), self = u && u.id !== 0 ? resById(u.id) : null;
+  const id = ui.fabTarget ?? (self ? self.id : null); if (id == null) return toast('請先點選一個人', true);
+  ui.fabTarget = null; startAway(id, reason);
+};
+// 時間軸日期
+const setTlDate = (v) => { if (!v) { ui.tlDate = null; } else { const [y, m, d] = v.split('-').map(Number); const t = new Date(y, m - 1, d); ui.tlDate = sameDay(t, new Date()) ? null : t.getTime(); } render(); };
+const shiftTl = (delta) => { const t = ui.tlDate ? new Date(ui.tlDate) : new Date(); t.setDate(t.getDate() + delta); setTlDate(`${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}`); };
 // 看板
 const kioskTap = (id) => { const r = resById(id); if (!r) return; ui.kioskActor = r.name; openModal('away', { id, kiosk: true }); kioskIdle(); };
 let kioskTimer;
