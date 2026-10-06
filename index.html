@@ -801,7 +801,7 @@ const now0 = new Date();
 let ui = {
   userId: null,                 // 0 = 內建管理者
   tab: 'schedule',
-  view: 'week',                 // week | month
+  view: 'month',                 // week | month
   year: now0.getFullYear(), month: now0.getMonth(),
   week: null,                   // 週索引，null = 自動跳到今天所在週
   brush: null,                  // 快速排班：選中的班別
@@ -2682,7 +2682,7 @@ const doLogin = async () => {
     if (chk('remember-me')) localStorage.setItem(REMEMBER_KEY, JSON.stringify({ u, id: user.id, auto: true }));
     else localStorage.removeItem(REMEMBER_KEY);
   } catch (e) {}
-  ui.userId = user.id; ui.tab = 'schedule'; ui.week = null;
+  ui.userId = user.id;    ui.tab = 'schedule'; ui.view = 'month'; ui.week = null;
   render(); updateTitle(); checkAwayPrompt();
   if (user.id === 0) loadFromCloud({ silent: true }).then(() => { afterCloudLoad(); render(); });
 };
